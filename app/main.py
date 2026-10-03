@@ -5,14 +5,16 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .engine import Engine
+from .configuration import Configuration
 from .literature import Literature
 from .models import (CommandInput, FeedbackInput, MemoryInput, ProjectInput, RunInput,
-                     SelectionInput, SourceInput)
+                     SelectionInput, SourceInput, ProviderInput)
 from .provider import CompatibleProvider, Settings
 from .store import Conflict, Store, uid
 
@@ -20,7 +22,8 @@ from .store import Conflict, Store, uid
 def create_app(data_dir=None, provider=None, literature_factory=Literature):
     settings = Settings.load()
     store = Store(Path(data_dir or os.getenv("IDEA_DATA_DIR", "data")) / "research.db")
-    engine = Engine(store, provider or CompatibleProvider(settings), literature_factory(store))
+    configuration = Configuration(store.path.parent)
+    engine = Engine(store, provider or CompatibleProvider(configuration.load(settings)), literature_factory(store))
 
     @asynccontextmanager
     async def lifespan(app):
@@ -37,6 +40,7 @@ def create_app(data_dir=None, provider=None, literature_factory=Literature):
         if request.method not in ("GET", "HEAD", "OPTIONS"):
             origin = request.headers.get("origin")
             if origin and origin not in {
+                str(request.base_url).rstrip("/"),
                 "http://localhost:8765", "http://127.0.0.1:8765",
                 "http://localhost:5173", "http://127.0.0.1:5173",
             }:
@@ -46,6 +50,12 @@ def create_app(data_dir=None, provider=None, literature_factory=Literature):
     @app.exception_handler(Conflict)
     async def conflict_handler(request, exc):
         return JSONResponse({"detail": str(exc)}, status_code=409)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_handler(request, exc):
+        # Validation responses must never echo a submitted API key or request body.
+        return JSONResponse({"detail": [{"loc": e["loc"], "msg": e["msg"], "type": e["type"]}
+                                        for e in exc.errors()]}, status_code=422)
 
     def project_or_404(project_id):
         project = store.project(project_id)
@@ -62,7 +72,21 @@ def create_app(data_dir=None, provider=None, literature_factory=Literature):
     def config():
         actual = engine.provider.settings
         return {"configured": actual.ready, "model": actual.model,
+                "api_base": actual.api_base, "has_api_key": bool(actual.api_key),
+                "token_parameter": actual.token_parameter, "max_output": actual.max_output,
                 "output_mode": actual.output_mode, "experiments_enabled": False}
+
+    @app.post("/api/config")
+    async def save_config(body: ProviderInput):
+        try:
+            updated = configuration.resolve(body, engine.provider.settings)
+            configuration.save(updated)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
+        except OSError:
+            raise HTTPException(500, "配置未能保存，原配置保持有效，请检查本地数据目录权限。") from None
+        engine.provider = CompatibleProvider(updated, getattr(engine.provider, "transport", None))
+        return config()
 
     @app.get("/api/projects")
     def projects():
@@ -126,7 +150,7 @@ def create_app(data_dir=None, provider=None, literature_factory=Literature):
     async def start(project_id: str, body: RunInput):
         project_or_404(project_id)
         if not engine.provider.settings.ready:
-            raise HTTPException(422, "请先配置本地模型服务，重启后开始探索。")
+            raise HTTPException(422, "请先在运行设置中保存模型服务配置。")
         run = store.create_run(project_id, body.model_dump())
         engine.start(run["id"])
         return run

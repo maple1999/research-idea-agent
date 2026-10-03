@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, SecretStr, field_validator
 
 
 class StrictModel(BaseModel):
@@ -91,3 +91,26 @@ class MemoryInput(StrictModel):
 
 class CommandInput(StrictModel):
     command: Literal["pause", "resume", "cancel"]
+
+
+class ProviderInput(StrictModel):
+    api_base: HttpUrl
+    api_key: SecretStr | None = None
+    model: str = Field(min_length=1, max_length=200)
+    output_mode: Literal["json_schema", "json_object", "text"]
+    token_parameter: Literal["max_tokens", "max_completion_tokens"]
+    max_output: int = Field(ge=1000, le=8000)
+
+    @field_validator("api_base")
+    @classmethod
+    def plain_endpoint(cls, value):
+        if value.username or value.password or value.query or value.fragment:
+            raise ValueError("API 地址不能包含账号、密码、查询参数或片段")
+        return value
+
+    @field_validator("model")
+    @classmethod
+    def nonempty_model(cls, value):
+        if not value.strip():
+            raise ValueError("请填写模型名称")
+        return value.strip()

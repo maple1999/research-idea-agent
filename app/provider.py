@@ -38,7 +38,7 @@ Return only a JSON object matching the provided schema. No markdown fences.
 """
 
 
-@dataclass
+@dataclass(frozen=True)
 class Settings:
     api_base: str
     api_key: str
@@ -106,7 +106,7 @@ class CompatibleProvider:
 
     async def generate(self, project, timeout=120):
         if not self.settings.ready:
-            raise ProviderError("请在本地 .env 设置 IDEA_API_KEY 和 IDEA_MODEL，然后重启服务。")
+            raise ProviderError("请在运行设置中填写模型服务与 API 密钥，保存后即可探索。")
         body = self.request(project)
         try:
             async with httpx.AsyncClient(transport=self.transport, timeout=timeout) as client:

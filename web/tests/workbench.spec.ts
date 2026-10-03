@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
 
+test.describe.configure({ mode: 'serial' });
+
 test('develop, inspect, correct and preserve a research direction', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -42,4 +44,23 @@ test('develop, inspect, correct and preserve a research direction', async ({ pag
   await page.screenshot({ path: 'test-results/workbench-mobile.png', fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(errors).toEqual([]);
+});
+
+test('save model configuration without restarting and never refill the key', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: '运行设置' }).click();
+  await expect(page.getByLabel('模型名称', {exact: true})).toHaveValue('fixture');
+  await page.getByLabel('模型名称', {exact: true}).fill('browser-test-model');
+  await page.getByLabel('API 密钥', {exact: true}).fill('browser-test-secret');
+  await page.getByRole('button', { name: '保存模型配置' }).click();
+  await expect(page.getByRole('status')).toContainText('已保存');
+  await expect(page.getByLabel('API 密钥', {exact: true})).toHaveValue('');
+  await page.reload();
+  await page.getByRole('button', { name: '运行设置' }).click();
+  await expect(page.getByLabel('模型名称', {exact: true})).toHaveValue('browser-test-model');
+  await expect(page.getByLabel('API 密钥', {exact: true})).toHaveValue('');
+  await page.getByLabel('输出格式', {exact: true}).selectOption('text');
+  await page.getByRole('button', { name: '保存模型配置' }).click();
+  await expect(page.getByRole('status')).toContainText('已保存');
+  await page.screenshot({path: 'test-results/live-settings.png', fullPage: true});
 });

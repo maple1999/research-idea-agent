@@ -28,7 +28,9 @@ cd research-idea-agent
 uv sync
 ```
 
-Copy `.env.example` to `.env` and set:
+Model settings can be entered in **运行设置 → 模型服务** after starting the app. Save once to apply them to the next model call, without restarting. In-flight calls finish using their original configuration. A blank key field preserves the saved key; changing the endpoint requires its key.
+
+Alternatively, copy `.env.example` to `.env` to supply initial defaults:
 
 ```dotenv
 IDEA_API_BASE=https://your-provider.example/v1
@@ -62,6 +64,8 @@ Keep a single backend worker: this release's active-task coordinator is in proce
 | `IDEA_DATA_DIR` | Local SQLite data directory, default `data` |
 
 Choose the format supported by your service. In all modes, responses are validated locally. Endpoint errors do not trigger automatic paid retries or silent fallback to another model. Keys remain server-side. Project materials are sent to the configured model service during a run; arXiv receives literature queries when search is enabled.
+
+Settings saved through the UI persist in `data/provider-settings.json` (or `IDEA_DATA_DIR`), which is excluded from Git. This local file includes the key; the API never returns it. Saved UI settings take precedence over `.env` on subsequent starts. Saving changes configuration only; it does not make a paid test request. Exploration budgets still apply to the next research round.
 
 ## Controls and budgets
 

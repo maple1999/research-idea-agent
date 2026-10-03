@@ -81,8 +81,9 @@ class Engine:
                     self.stop(run_id, "completed", "本轮时间预算已用完，检索记录已保存。")
                     return
             project = project | {"search_enabled": budget["use_search"]}
+            provider = self.provider  # Keep reservation and dispatch on the same configuration.
             try:
-                reserved = self.provider.reserve(project)
+                reserved = provider.reserve(project)
             except ProviderError as exc:
                 self.stop(run_id, "failed", str(exc))
                 return
@@ -95,7 +96,7 @@ class Engine:
                              {"summary": "分析重要问题、具体机制与已有基础，发展候选研究方案。"})
             started = time.monotonic()
             try:
-                result, usage = await self.provider.generate(project, timeout=min(180, remaining))
+                result, usage = await provider.generate(project, timeout=min(180, remaining))
                 current = self.store.run(run_id)
                 self.store.update_run(run_id, tokens=run["tokens"] + (reserved if usage is None else usage),
                                       usage_estimated=run["usage_estimated"] or usage is None)

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 import { ArrowRight, BookOpen, Check, ChevronRight, Download, FlaskConical, GitBranch,
   Layers, Lightbulb, Pause, Play, Plus, Send, Settings2, Sparkles, Square, X } from 'lucide-react';
 import type { Direction, Event, Project, Source } from './types';
+import { ModelSettings, type ProviderConfig } from './ModelSettings';
 
 async function api<T>(path: string, body?: unknown, method = 'POST'): Promise<T> {
   const response = await fetch('/api' + path, body === undefined ? undefined : {
@@ -58,7 +59,8 @@ export default function App() {
   const [tab, setTab] = useState('overview');
   const [events, setEvents] = useState<Event[]>([]);
   const [history, setHistory] = useState<Project[]>([]);
-  const [config, setConfig] = useState({configured: false, model: '', output_mode: ''});
+  const [config, setConfig] = useState<ProviderConfig>({configured: false, model: '',
+    api_base: '', has_api_key: false, output_mode: 'json_object', token_parameter: 'max_tokens', max_output: 3500});
   const [modal, setModal] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -141,7 +143,7 @@ export default function App() {
             <a className="icon-button" aria-label="导出研究快照" href={`/api/projects/${id}/export`}><Download size={17}/></a>
           </div>
         </section>
-        {!config.configured && <div className="config-notice"><Settings2 size={18}/><div>连接模型后即可开始探索。<span>在项目 .env 中设置 API 地址、密钥和模型，然后重启服务。研究材料可以先行导入。</span></div></div>}
+        {!config.configured && <div className="config-notice"><Settings2 size={18}/><div>连接模型后即可开始探索。<span>在右上角运行设置中填写 API 地址、密钥和模型，保存后即可使用。</span></div></div>}
         <div className="workspace">
           <section className="directions-panel">
             <div className="section-heading"><h2>研究方向 <span>{project.directions.length.toString().padStart(2, '0')}</span></h2><button className="subtle" onClick={() => setModal('source')}><Plus size={15}/>导入材料</button></div>
@@ -182,6 +184,8 @@ export default function App() {
     {modal === 'project' && <Modal title="建立研究课题" close={() => setModal('')}><form onSubmit={submitCreate}><label>课题名称<input name="title" required maxLength={160} placeholder="例如：长视频理解中的信息保留" autoFocus/></label><label>希望探索的问题<textarea name="question" required minLength={5} maxLength={6000} rows={4} placeholder="你关注什么问题？已有怎样的想法或观察？"/></label><label>已有条件与偏好<textarea name="constraints" maxLength={3000} rows={2} placeholder="可用数据、计算资源、偏好的研究方式…"/></label><button className="primary" disabled={busy}>建立课题<ArrowRight size={16}/></button></form></Modal>}
     {modal === 'source' && <Modal title="导入研究材料" close={() => setModal('')}><form onSubmit={e => {e.preventDefault(); const data=Object.fromEntries(new FormData(e.currentTarget)); act(async () => {await api(`/projects/${id}/sources`, {...data, url: data.url || null}); setModal('');});}}><label>资料标题<input name="title" required maxLength={300}/></label><label>来源网址<input name="url" type="url" placeholder="https://arxiv.org/abs/…"/></label><label>所在位置<input name="locator" defaultValue="摘要" maxLength={300}/></label><label>原文或笔记<textarea name="text" required minLength={20} maxLength={20000} rows={7}/></label><p className="muted small">这里保存原文片段。网址仅作来源链接，不会自动抓取全文。</p><button className="primary" disabled={busy}>导入材料</button></form></Modal>}
     {modal === 'memory' && <Modal title="记录课题经验" close={() => setModal('')}><form onSubmit={e => {e.preventDefault(); const data=Object.fromEntries(new FormData(e.currentTarget)); act(async () => {await api(`/projects/${id}/memories`, data); setModal('');});}}><label>经验或判断<textarea name="statement" required minLength={5} maxLength={3000} rows={3}/></label><label>适用条件<textarea name="conditions" required maxLength={3000} rows={3}/></label><button className="primary" disabled={busy}>保存经验</button></form></Modal>}
-    {modal === 'settings' && <Modal title="探索设置" close={() => setModal('')}><div className="settings-body"><p>设置应用于下一轮探索。实验执行暂未启用。</p><label>模型调用上限<input type="number" min={1} max={12} value={maxCalls} onChange={e => setMaxCalls(Number(e.target.value))}/></label><label>Token 预算<input type="number" min={5000} max={250000} step={5000} value={maxTokens} onChange={e => setMaxTokens(Number(e.target.value))}/></label><label>时间上限（分钟）<input type="number" min={1} max={120} value={maxMinutes} onChange={e => setMaxMinutes(Number(e.target.value))}/></label><label className="checkbox"><input type="checkbox" checked={useSearch} onChange={e => setUseSearch(e.target.checked)}/>检索 arXiv 文献摘要</label><div className="config-box"><strong>{config.configured ? config.model : '尚未配置模型'}</strong><p>API 地址、密钥、模型和输出格式通过项目 .env 配置。修改后重启后端。</p></div><button className="primary" onClick={() => setModal('')}>完成</button></div></Modal>}
+    {modal === 'settings' && <Modal title="探索设置" close={() => setModal('')}><div className="settings-body">
+      <ModelSettings config={config} save={async draft => {const saved = await api<ProviderConfig>('/config', draft); setConfig(saved); return saved;}}/>
+      <hr/><h3>探索预算</h3><p>以下预算应用于下一轮探索。实验执行暂未启用。</p><label>模型调用上限<input type="number" min={1} max={12} value={maxCalls} onChange={e => setMaxCalls(Number(e.target.value))}/></label><label>Token 预算<input type="number" min={5000} max={250000} step={5000} value={maxTokens} onChange={e => setMaxTokens(Number(e.target.value))}/></label><label>时间上限（分钟）<input type="number" min={1} max={120} value={maxMinutes} onChange={e => setMaxMinutes(Number(e.target.value))}/></label><label className="checkbox"><input type="checkbox" checked={useSearch} onChange={e => setUseSearch(e.target.checked)}/>检索 arXiv 文献摘要</label><button className="primary" onClick={() => setModal('')}>完成</button></div></Modal>}
   </div>;
 }
