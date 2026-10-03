@@ -6,7 +6,8 @@ Create a research question, bring your sources, and develop a small set of resea
 
 ## What works in this release
 
-- OpenAI-compatible Chat Completions APIs with configurable endpoint, model, output format and token parameter.
+- OpenAI-compatible Chat Completions APIs: configure only API URL, API Key and model name.
+- Optional model assignments for exploration, literature analysis and constructive review.
 - Autonomous, bounded rounds of literature discovery and proposal development.
 - A visible initial proposal followed by targeted, model-planned English literature queries.
 - Separate innovation, impact and feasibility reasoning for each direction.
@@ -36,8 +37,6 @@ Alternatively, copy `.env.example` to `.env` to supply initial defaults:
 IDEA_API_BASE=https://your-provider.example/v1
 IDEA_API_KEY=your-local-key
 IDEA_MODEL=your-model-name
-IDEA_OUTPUT_MODE=json_object
-IDEA_TOKEN_PARAMETER=max_tokens
 ```
 
 Then build the interface and start one local backend worker:
@@ -56,20 +55,25 @@ Keep a single backend worker: this release's active-task coordinator is in proce
 
 ## Provider compatibility
 
-| Setting | Options |
-|---|---|
-| `IDEA_OUTPUT_MODE` | `json_schema`, `json_object` (default), `text` |
-| `IDEA_TOKEN_PARAMETER` | `max_tokens` (default), `max_completion_tokens` |
-| `IDEA_MAX_OUTPUT_TOKENS` | Per-call output limit, default 3500 |
-| `IDEA_DATA_DIR` | Local SQLite data directory, default `data` |
+Requests include the model and messages, with JSON instructions validated locally. The app sends neither `max_tokens` nor `max_completion_tokens`, and does not require `response_format` support. There is no application-imposed per-call output cap; the service's own defaults and limits still apply. Previous output-limit and format settings in saved files or environment variables are no longer used.
 
-Choose the format supported by your service. In all modes, responses are validated locally. Endpoint errors do not trigger automatic paid retries or silent fallback to another model. Keys remain server-side. Project materials are sent to the configured model service during a run; arXiv receives literature queries when search is enabled.
+Endpoint errors do not trigger automatic paid retries or silent fallback to another model. Keys remain server-side. Project materials are sent to the model services assigned to the relevant tasks; arXiv receives literature queries. `IDEA_DATA_DIR` optionally sets the local data directory (default `data`).
 
-Settings saved through the UI persist in `data/provider-settings.json` (or `IDEA_DATA_DIR`), which is excluded from Git. This local file includes the key; the API never returns it. Saved UI settings take precedence over `.env` on subsequent starts. Saving changes configuration only; it does not make a paid test request. Exploration budgets still apply to the next research round.
+Settings saved through the UI persist in `data/provider-settings.json` (or `IDEA_DATA_DIR`), which is excluded from Git. This local file includes keys; the API never returns them. Saved UI settings take precedence over `.env` on subsequent starts. Earlier single-model configurations load automatically as the default model. Saving changes configuration only; it does not make a paid test request.
+
+## Model assignments
+
+One model covers every task by default. Use **添加模型** to enter another endpoint, key and model, then assign models to:
+
+- **研究探索**: develop and refine research questions and mechanisms.
+- **文献分析**: synthesize evidence after a literature search.
+- **方案审查**: critique and improve proposals constructively.
+
+When a separate reviewer is assigned, a completed proposal is scheduled for that reviewer before finishing, subject to the remaining round budget. A model can also explicitly request a review. Sharing one model does not force an extra review call. Events record the actual task and model for each call. Changes apply at the next call; an in-flight call retains its original provider and credentials.
 
 ## Controls and budgets
 
-Each run has call, token and active-time limits. Before a call, the app reserves a conservative UTF-8-size input estimate plus the output limit. Returned usage replaces that reservation when available. Providers differ in token accounting, so the token limit is an application estimate, not a billing guarantee. Call limits are enforced before dispatch. Fees are not estimated in this release.
+The interface uses default exploration budgets without exposing tuning parameters: four model calls, 45,000 estimated tokens and 15 active minutes per round. These can still be supplied through the run API. This is separate from per-call output length. Before dispatch, accounting reserves a UTF-8-size input estimate plus a 4,096-token output estimate; that estimate is never sent as a generation limit. Returned usage replaces it when available and may exceed it. Token budgeting is approximate, not a billing guarantee. Call limits are enforced before dispatch. Fees are not estimated in this release.
 
 Pause completes the current request and stops subsequent work. Cancel discards its eventual proposal while accounting for usage. A correction advances the project revision: output generated from an older revision cannot overwrite it. After a crash, unknown in-flight usage stays reserved. A browser disconnect does not stop research.
 
@@ -107,4 +111,4 @@ The repository contains the application and public usage documentation. Credenti
 
 Implementation is original. Design references include [ResearchStudio](https://github.com/microsoft/ResearchStudio), [OpenAI4S](https://github.com/PKU-YuanGroup/OpenAI4S), [Scideator](https://arxiv.org/abs/2409.14634), [IDEAgent](https://arxiv.org/abs/2607.22375), and [AIM](https://arxiv.org/abs/2609.38445). No source code from these projects is bundled.
 
-The compatible provider follows the [Chat Completions interface](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create) and configurable [structured-output formats](https://developers.openai.com/api/docs/guides/structured-outputs).
+The compatible provider follows the [Chat Completions interface](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create), using service defaults for output length and validating the returned JSON locally.

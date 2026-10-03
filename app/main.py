@@ -14,8 +14,9 @@ from .engine import Engine
 from .configuration import Configuration
 from .literature import Literature
 from .models import (CommandInput, FeedbackInput, MemoryInput, ProjectInput, RunInput,
-                     SelectionInput, SourceInput, ProviderInput)
-from .provider import CompatibleProvider, Settings
+                     SelectionInput, SourceInput, ModelsInput)
+from .provider import Settings
+from .routing import ModelConfiguration, ModelRouter
 from .store import Conflict, Store, uid
 
 
@@ -23,7 +24,7 @@ def create_app(data_dir=None, provider=None, literature_factory=Literature):
     settings = Settings.load()
     store = Store(Path(data_dir or os.getenv("IDEA_DATA_DIR", "data")) / "research.db")
     configuration = Configuration(store.path.parent)
-    engine = Engine(store, provider or CompatibleProvider(configuration.load(settings)), literature_factory(store))
+    engine = Engine(store, provider or ModelRouter(configuration.load(settings)), literature_factory(store))
 
     @asynccontextmanager
     async def lifespan(app):
@@ -70,22 +71,22 @@ def create_app(data_dir=None, provider=None, literature_factory=Literature):
 
     @app.get("/api/config")
     def config():
-        actual = engine.provider.settings
-        return {"configured": actual.ready, "model": actual.model,
-                "api_base": actual.api_base, "has_api_key": bool(actual.api_key),
-                "token_parameter": actual.token_parameter, "max_output": actual.max_output,
-                "output_mode": actual.output_mode, "experiments_enabled": False}
+        return model_configuration().public()
+
+    def model_configuration():
+        current = engine.provider
+        return current.configuration if isinstance(current, ModelRouter) else ModelConfiguration.single(current.settings)
 
     @app.post("/api/config")
-    async def save_config(body: ProviderInput):
+    async def save_config(body: ModelsInput):
         try:
-            updated = configuration.resolve(body, engine.provider.settings)
+            updated = configuration.resolve(body, model_configuration())
             configuration.save(updated)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from None
         except OSError:
             raise HTTPException(500, "配置未能保存，原配置保持有效，请检查本地数据目录权限。") from None
-        engine.provider = CompatibleProvider(updated, getattr(engine.provider, "transport", None))
+        engine.provider = ModelRouter(updated, getattr(engine.provider, "transport", None))
         return config()
 
     @app.get("/api/projects")

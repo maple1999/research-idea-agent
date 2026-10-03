@@ -3,6 +3,7 @@ import time
 
 from .provider import ProviderError
 from .store import Conflict
+from .routing import TASK_NAMES
 
 
 class Engine:
@@ -71,7 +72,7 @@ class Engine:
                 finally:
                     self.store.update_run(run_id, elapsed=run["elapsed"] + time.monotonic() - started,
                                           searched=search_applied,
-                                          next_action="develop" if search_applied else "search")
+                                          next_action="literature" if search_applied else "search")
                 if not self.check(run_id):
                     return
                 run = self.store.run(run_id)
@@ -80,8 +81,10 @@ class Engine:
                 if remaining <= 0:
                     self.stop(run_id, "completed", "本轮时间预算已用完，检索记录已保存。")
                     return
-            project = project | {"search_enabled": budget["use_search"]}
-            provider = self.provider  # Keep reservation and dispatch on the same configuration.
+            task = run["next_action"] if run["next_action"] in ("literature", "review") else "exploration"
+            project = project | {"search_enabled": budget["use_search"], "current_task": task}
+            router = self.provider
+            provider = router.for_task(task) if hasattr(router, "for_task") else router
             try:
                 reserved = provider.reserve(project)
             except ProviderError as exc:
@@ -93,7 +96,8 @@ class Engine:
             self.store.update_run(run_id, calls=run["calls"] + 1, tokens=run["tokens"] + reserved,
                                   usage_estimated=True)
             self.store.event(project["id"], "research.developing",
-                             {"summary": "分析重要问题、具体机制与已有基础，发展候选研究方案。"})
+                             {"summary": f"{TASK_NAMES[task]} · {provider.settings.model}",
+                              "task": task, "model": provider.settings.model})
             started = time.monotonic()
             try:
                 result, usage = await provider.generate(project, timeout=min(180, remaining))
@@ -121,10 +125,16 @@ class Engine:
                     p["directions"] = incoming + preserved
                 self.store.mutate(project["id"], project["revision"], apply_result,
                                   "directions.updated", result.summary)
+                next_action = result.next_action
+                if next_action == "finish" and task != "review" and hasattr(router, "separate_reviewer"):
+                    if router.separate_reviewer():
+                        next_action = "review"
+                        self.store.event(project["id"], "research.review_pending",
+                                         {"summary": "候选方案已保存，接下来交由审查模型进一步检查和发展。"})
                 self.store.update_run(run_id, step=run["step"] + 1,
-                                      next_action=result.next_action, search_query=result.search_query[:300])
+                                      next_action=next_action, search_query=result.search_query[:300])
                 self.store.event(project["id"], "research.next", {"summary": result.rationale})
-                if result.next_action == "finish":
+                if next_action == "finish":
                     if self.check(run_id):
                         self.stop(run_id, "completed", "本轮研究方案已形成，可审查、纠正或继续发展。")
                     return

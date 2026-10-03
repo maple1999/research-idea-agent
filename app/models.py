@@ -73,7 +73,7 @@ class Direction(StrictModel):
 class ResearchStep(StrictModel):
     summary: str
     directions: list[Direction] = Field(min_length=1, max_length=4)
-    next_action: Literal["search", "develop", "finish"]
+    next_action: Literal["search", "develop", "review", "finish"]
     search_query: str
     rationale: str
 
@@ -94,12 +94,10 @@ class CommandInput(StrictModel):
 
 
 class ProviderInput(StrictModel):
+    id: str = Field(default="default", pattern=r"^[a-zA-Z0-9_-]{1,64}$")
     api_base: HttpUrl
     api_key: SecretStr | None = None
     model: str = Field(min_length=1, max_length=200)
-    output_mode: Literal["json_schema", "json_object", "text"]
-    token_parameter: Literal["max_tokens", "max_completion_tokens"]
-    max_output: int = Field(ge=1000, le=8000)
 
     @field_validator("api_base")
     @classmethod
@@ -114,3 +112,14 @@ class ProviderInput(StrictModel):
         if not value.strip():
             raise ValueError("请填写模型名称")
         return value.strip()
+
+
+class TaskAssignments(StrictModel):
+    exploration: str = "default"
+    literature: str = "default"
+    review: str = "default"
+
+
+class ModelsInput(StrictModel):
+    models: list[ProviderInput] = Field(min_length=1, max_length=20)
+    assignments: TaskAssignments = Field(default_factory=TaskAssignments)

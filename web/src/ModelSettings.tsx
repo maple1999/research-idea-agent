@@ -1,41 +1,63 @@
 import { useState, type FormEvent } from 'react';
 
-export type ProviderConfig = {
-  configured: boolean; api_base: string; model: string; has_api_key: boolean;
-  output_mode: string; token_parameter: string; max_output: number;
-};
-export type ProviderDraft = Omit<ProviderConfig, 'configured' | 'has_api_key'> & {api_key: string | null};
+type Model = {id: string; api_base: string; model: string; has_api_key: boolean};
+type Assignments = {exploration: string; literature: string; review: string};
+export type ProviderConfig = {configured: boolean; model: string; models: Model[]; assignments: Assignments};
+export type ProviderDraft = {models: (Omit<Model, 'has_api_key'> & {api_key: string | null})[]; assignments: Assignments};
+const roles = {exploration: '研究探索', literature: '文献分析', review: '方案审查'};
+const toDraft = (config: ProviderConfig): ProviderDraft => ({
+  models: config.models.map(m => ({id: m.id, api_base: m.api_base, model: m.model, api_key: ''})),
+  assignments: {...config.assignments},
+});
 
 export function ModelSettings({config, save}: {
   config: ProviderConfig; save: (value: ProviderDraft) => Promise<ProviderConfig>;
 }) {
-  const [draft, setDraft] = useState<ProviderDraft>({...config, api_key: ''});
+  const [draft, setDraft] = useState(() => toDraft(config));
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const changedEndpoint = draft.api_base.replace(/\/+$/, '') !== config.api_base.replace(/\/+$/, '');
+  const update = (id: string, field: 'api_base'|'api_key'|'model', value: string) => {
+    setDraft(d => ({...d, models: d.models.map(m => m.id === id ? {...m, [field]: value} : m)}));
+    setMessage('');
+  };
+  const remove = (id: string) => setDraft(d => ({
+    models: d.models.filter(m => m.id !== id),
+    assignments: Object.fromEntries(Object.entries(d.assignments).map(([task, mid]) =>
+      [task, mid === id ? d.models[0].id : mid])) as Assignments,
+  }));
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setPending(true); setError(''); setMessage('');
     try {
-      const saved = await save({api_base: draft.api_base, api_key: draft.api_key?.trim() || null,
-        model: draft.model, output_mode: draft.output_mode,
-        token_parameter: draft.token_parameter, max_output: draft.max_output});
-      setDraft({...saved, api_key: ''});
-      setMessage('已保存，下一次模型调用立即使用新配置。');
+      const saved = await save({...draft, models: draft.models.map(m => ({...m, api_key: m.api_key?.trim() || null}))});
+      setDraft(toDraft(saved));
+      setMessage('已保存，后续任务使用新的模型配置与分工。');
     } catch (e) { setError(e instanceof Error ? e.message : '配置保存失败，请重试。'); }
     finally { setPending(false); }
   };
   return <form onSubmit={submit} aria-label="模型配置">
-    <h3>模型服务</h3>
-    <p className="muted small">保存后立即生效。当前调用继续完成，后续调用使用新配置。</p>
+    <p className="muted small">填入一个模型即可开始。保存后立即生效，当前调用会继续完成。</p>
     <fieldset disabled={pending} className="provider-fields">
-      <label>API 地址<input type="url" required value={draft.api_base} onChange={e => setDraft({...draft, api_base: e.target.value})} placeholder="https://your-provider.example/v1"/></label>
-      <label>模型名称<input required maxLength={200} value={draft.model} onChange={e => setDraft({...draft, model: e.target.value})}/></label>
-      <label>API 密钥<input type="password" autoComplete="new-password" required={!config.has_api_key || changedEndpoint} value={draft.api_key || ''} onChange={e => setDraft({...draft, api_key: e.target.value})} placeholder={config.has_api_key && !changedEndpoint ? '已保存；留空保留原密钥' : '填写该服务的密钥'}/></label>
-      <p className="muted small">密钥仅保存在本机，不回显。更换 API 地址时需填写对应密钥。</p>
-      <label>输出格式<select aria-label="输出格式" value={draft.output_mode} onChange={e => setDraft({...draft, output_mode: e.target.value})}><option value="json_object">JSON 对象（json_object）</option><option value="json_schema">结构化输出（json_schema）</option><option value="text">文本 JSON（text）</option></select></label>
-      <label>输出额度参数<select aria-label="输出额度参数" value={draft.token_parameter} onChange={e => setDraft({...draft, token_parameter: e.target.value})}><option value="max_tokens">max_tokens</option><option value="max_completion_tokens">max_completion_tokens</option></select></label>
-      <label>单次输出 Token 上限<input type="number" min={1000} max={8000} required value={draft.max_output} onChange={e => setDraft({...draft, max_output: Number(e.target.value)})}/></label>
+      {draft.models.map((m, index) => {
+        const saved = config.models.find(old => old.id === m.id);
+        const keepKey = saved?.has_api_key && saved.api_base.replace(/\/+$/, '') === m.api_base.replace(/\/+$/, '');
+        return <section className="model-entry" key={m.id} aria-label={index === 0 ? '默认模型' : `模型 ${index + 1}`}>
+          <div className="section-heading"><h3>{index === 0 ? '默认模型' : `模型 ${index + 1}`}</h3>
+            {index > 0 && <button type="button" className="subtle" onClick={() => remove(m.id)}>移除</button>}</div>
+          <label>API URL<input type="url" required value={m.api_base} onChange={e => update(m.id, 'api_base', e.target.value)} placeholder="https://your-provider.example/v1"/></label>
+          <label>API Key<input type="password" autoComplete="new-password" required={!keepKey} value={m.api_key || ''} onChange={e => update(m.id, 'api_key', e.target.value)} placeholder={keepKey ? '已保存；留空保留原密钥' : '填写该服务的密钥'}/></label>
+          <label>模型名<input required maxLength={200} value={m.model} onChange={e => update(m.id, 'model', e.target.value)} placeholder="服务商提供的模型名称"/></label>
+        </section>;
+      })}
+      <button type="button" className="secondary" onClick={() => {setMessage(''); setDraft(d => ({...d,
+        models: [...d.models, {id: crypto.randomUUID(), api_base: '', api_key: '', model: ''}]}));}}>添加模型</button>
+      {draft.models.length > 1 && <section className="task-assignments"><h3>任务分工</h3><p className="muted small">可以让不同模型负责不同环节，也可以共用一个模型。</p>
+        {(Object.keys(roles) as (keyof Assignments)[]).map(task => <label key={task}>{roles[task]}
+          <select aria-label={roles[task]} value={draft.assignments[task]} onChange={e => {setMessage(''); setDraft(d => ({...d, assignments: {...d.assignments, [task]: e.target.value}}));}}>
+            {draft.models.map((m, i) => <option key={m.id} value={m.id}>{i === 0 ? '默认模型' : `模型 ${i + 1}`} · {m.model || '待填写'}</option>)}
+          </select></label>)}
+      </section>}
+      <p className="muted small">密钥仅保存在本机，不回显。更换 API URL 时需填写对应密钥。</p>
       <button className="primary" disabled={pending}>{pending ? '正在保存…' : '保存模型配置'}</button>
     </fieldset>
     {message && <p role="status" className="config-success">{message}</p>}

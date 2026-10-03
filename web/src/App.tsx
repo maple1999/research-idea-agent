@@ -60,7 +60,9 @@ export default function App() {
   const [events, setEvents] = useState<Event[]>([]);
   const [history, setHistory] = useState<Project[]>([]);
   const [config, setConfig] = useState<ProviderConfig>({configured: false, model: '',
-    api_base: '', has_api_key: false, output_mode: 'json_object', token_parameter: 'max_tokens', max_output: 3500});
+    models: [{id: 'default', api_base: '', model: '', has_api_key: false}],
+    assignments: {exploration: 'default', literature: 'default', review: 'default'}});
+  const [configLoaded, setConfigLoaded] = useState(false);
   const [modal, setModal] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -68,10 +70,6 @@ export default function App() {
   const [kind, setKind] = useState('instruction');
   const [scope, setScope] = useState('direction');
   const [sourceId, setSourceId] = useState('');
-  const [maxCalls, setMaxCalls] = useState(4);
-  const [maxTokens, setMaxTokens] = useState(45000);
-  const [maxMinutes, setMaxMinutes] = useState(15);
-  const [useSearch, setUseSearch] = useState(true);
   const currentId = useRef(id);
   const refreshSequence = useRef(0);
   currentId.current = id;
@@ -84,7 +82,7 @@ export default function App() {
       setSelected(old => p.directions.some(d => d.id === old) ? old : p.directions[0]?.id || '');
     }
   }, []);
-  useEffect(() => { refreshIndex().catch(e => setError(e.message)); api<typeof config>('/config').then(setConfig).catch(e => setError(e.message)); }, [refreshIndex]);
+  useEffect(() => { refreshIndex().catch(e => setError(e.message)); api<typeof config>('/config').then(c => {setConfig(c); setConfigLoaded(true);}).catch(e => setError(e.message)); }, [refreshIndex]);
   useEffect(() => {
     setProject(null); setEvents([]); setSourceId(''); setSelected(''); setTab('overview'); setHistory([]);
     if (!id) return;
@@ -139,7 +137,7 @@ export default function App() {
         <section className="project-header">
           <div><div className="eyebrow">RESEARCH SPACE · V{project.revision}</div><h1>{project.title}</h1><p>{project.question}</p>{project.constraints && <div className="constraint">研究条件 · {project.constraints}</div>}</div>
           <div className="run-actions">
-            {active ? <><span className={'run-status ' + run.status}>{statuses[run.status]}</span><button className="primary" disabled={busy || run.status === 'pausing'} onClick={() => act(() => api(`/runs/${run.id}/commands`, {command: run.status === 'paused' ? 'resume' : 'pause'}))}>{run.status === 'paused' ? <Play size={16}/> : <Pause size={16}/>}{run.status === 'paused' ? '继续探索' : '暂停'}</button><button className="icon-button" aria-label="结束本轮探索" onClick={() => act(() => api(`/runs/${run.id}/commands`, {command: 'cancel'}))}><Square size={16}/></button></> : <button className="primary" disabled={busy || !config.configured} onClick={() => act(() => api(`/projects/${id}/runs`, {max_calls: maxCalls, max_tokens: maxTokens, max_minutes: maxMinutes, use_search: useSearch}))}><Sparkles size={16}/>{project.directions.length ? '继续发展方案' : '开始探索'}</button>}
+            {active ? <><span className={'run-status ' + run.status}>{statuses[run.status]}</span><button className="primary" disabled={busy || run.status === 'pausing'} onClick={() => act(() => api(`/runs/${run.id}/commands`, {command: run.status === 'paused' ? 'resume' : 'pause'}))}>{run.status === 'paused' ? <Play size={16}/> : <Pause size={16}/>}{run.status === 'paused' ? '继续探索' : '暂停'}</button><button className="icon-button" aria-label="结束本轮探索" onClick={() => act(() => api(`/runs/${run.id}/commands`, {command: 'cancel'}))}><Square size={16}/></button></> : <button className="primary" disabled={busy || !config.configured} onClick={() => act(() => api(`/projects/${id}/runs`, {}))}><Sparkles size={16}/>{project.directions.length ? '继续发展方案' : '开始探索'}</button>}
             <a className="icon-button" aria-label="导出研究快照" href={`/api/projects/${id}/export`}><Download size={17}/></a>
           </div>
         </section>
@@ -185,7 +183,7 @@ export default function App() {
     {modal === 'source' && <Modal title="导入研究材料" close={() => setModal('')}><form onSubmit={e => {e.preventDefault(); const data=Object.fromEntries(new FormData(e.currentTarget)); act(async () => {await api(`/projects/${id}/sources`, {...data, url: data.url || null}); setModal('');});}}><label>资料标题<input name="title" required maxLength={300}/></label><label>来源网址<input name="url" type="url" placeholder="https://arxiv.org/abs/…"/></label><label>所在位置<input name="locator" defaultValue="摘要" maxLength={300}/></label><label>原文或笔记<textarea name="text" required minLength={20} maxLength={20000} rows={7}/></label><p className="muted small">这里保存原文片段。网址仅作来源链接，不会自动抓取全文。</p><button className="primary" disabled={busy}>导入材料</button></form></Modal>}
     {modal === 'memory' && <Modal title="记录课题经验" close={() => setModal('')}><form onSubmit={e => {e.preventDefault(); const data=Object.fromEntries(new FormData(e.currentTarget)); act(async () => {await api(`/projects/${id}/memories`, data); setModal('');});}}><label>经验或判断<textarea name="statement" required minLength={5} maxLength={3000} rows={3}/></label><label>适用条件<textarea name="conditions" required maxLength={3000} rows={3}/></label><button className="primary" disabled={busy}>保存经验</button></form></Modal>}
     {modal === 'settings' && <Modal title="探索设置" close={() => setModal('')}><div className="settings-body">
-      <ModelSettings config={config} save={async draft => {const saved = await api<ProviderConfig>('/config', draft); setConfig(saved); return saved;}}/>
-      <hr/><h3>探索预算</h3><p>以下预算应用于下一轮探索。实验执行暂未启用。</p><label>模型调用上限<input type="number" min={1} max={12} value={maxCalls} onChange={e => setMaxCalls(Number(e.target.value))}/></label><label>Token 预算<input type="number" min={5000} max={250000} step={5000} value={maxTokens} onChange={e => setMaxTokens(Number(e.target.value))}/></label><label>时间上限（分钟）<input type="number" min={1} max={120} value={maxMinutes} onChange={e => setMaxMinutes(Number(e.target.value))}/></label><label className="checkbox"><input type="checkbox" checked={useSearch} onChange={e => setUseSearch(e.target.checked)}/>检索 arXiv 文献摘要</label><button className="primary" onClick={() => setModal('')}>完成</button></div></Modal>}
+      {configLoaded ? <ModelSettings config={config} save={async draft => {const saved = await api<ProviderConfig>('/config', draft); setConfig(saved); return saved;}}/> : <p>正在读取模型配置…</p>}
+      </div></Modal>}
   </div>;
 }

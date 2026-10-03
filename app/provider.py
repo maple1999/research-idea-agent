@@ -30,7 +30,7 @@ Distinguish proposed mechanisms, inference and source-supported statements.
 Retain stable direction IDs when revising; use new IDs for genuinely new branches.
 Return 1-4 substantive directions. Preserve strong candidates and improve weak aspects.
 next_action: search for a specific missing piece (English query), develop to improve the
-proposal, or finish when the present result is useful. Explain the next action briefly.
+proposal, review to request constructive review, or finish when useful. Explain why.
 When search_enabled is true and relevant literature is missing, propose an initial
 direction and request targeted English literature search before treating it as reviewed.
 When search_enabled is false, work with supplied materials and do not request search.
@@ -38,14 +38,23 @@ Return only a JSON object matching the provided schema. No markdown fences.
 """
 
 
+TASK_PROMPTS = {
+    "exploration": "Develop ambitious, concrete research questions and mechanisms using the supplied foundations.",
+    "literature": "Analyze retrieved evidence at mechanism level. Distinguish source statements from inference. "
+                  "Compare actual intervention sites and assumptions, then improve the research directions. "
+                  "Return develop when the synthesis should inform further proposal development.",
+    "review": "Constructively review and improve current directions. Check unsupported novelty, causal gaps, "
+              "feasibility and significance. Treat prior work as a foundation for deeper advances. "
+              "Keep strong ambitions; produce revised directions, not a blanket rejection. "
+              "Return finish if ready, or search/develop for a specific remaining need; do not request review again.",
+}
+
+
 @dataclass(frozen=True)
 class Settings:
     api_base: str
     api_key: str
     model: str
-    output_mode: str
-    token_parameter: str
-    max_output: int
 
     @classmethod
     def load(cls):
@@ -53,9 +62,6 @@ class Settings:
         return cls(
             os.getenv("IDEA_API_BASE", "https://api.openai.com/v1").rstrip("/"),
             os.getenv("IDEA_API_KEY", ""), os.getenv("IDEA_MODEL", ""),
-            os.getenv("IDEA_OUTPUT_MODE", "json_object"),
-            os.getenv("IDEA_TOKEN_PARAMETER", "max_tokens"),
-            min(8000, max(1000, int(os.getenv("IDEA_MAX_OUTPUT_TOKENS", "3500")))),
         )
 
     @property
@@ -79,30 +85,24 @@ class CompatibleProvider:
                 "materials": sources, "current_directions": project["directions"][:4],
                 "feedback": project["feedback"], "experience": project["memories"],
                 "selections": project.get("selections", {}),
-                "search_enabled": project.get("search_enabled", False)}
+                "search_enabled": project.get("search_enabled", False),
+                "current_task": project.get("current_task", "exploration")}
         return json.dumps(data, ensure_ascii=False)
 
     def request(self, project):
         schema = ResearchStep.model_json_schema()
         body = {"model": self.settings.model,
                 "messages": [{"role": "system", "content": SYSTEM},
+                             {"role": "system", "content": TASK_PROMPTS[project.get("current_task", "exploration")]},
                              {"role": "user", "content": self.context(project)},
                              {"role": "user", "content": "Required JSON schema: " + json.dumps(schema)}]}
-        if self.settings.token_parameter not in ("max_tokens", "max_completion_tokens"):
-            raise ProviderError("IDEA_TOKEN_PARAMETER 必须是 max_tokens 或 max_completion_tokens。")
-        body[self.settings.token_parameter] = self.settings.max_output
-        if self.settings.output_mode == "json_schema":
-            body["response_format"] = {"type": "json_schema", "json_schema": {
-                "name": "research_step", "strict": True, "schema": schema}}
-        elif self.settings.output_mode == "json_object":
-            body["response_format"] = {"type": "json_object"}
-        elif self.settings.output_mode != "text":
-            raise ProviderError("IDEA_OUTPUT_MODE 必须是 json_schema、json_object 或 text。")
+        # Service defaults control output length; validate JSON locally for compatibility.
         return body
 
     def reserve(self, project):
         # Conservative proxy, NOT a provider tokenizer or billing guarantee.
-        return len(json.dumps(self.request(project), ensure_ascii=False).encode("utf-8")) + self.settings.max_output
+        # This output allowance is an accounting estimate, never a request limit.
+        return len(json.dumps(self.request(project), ensure_ascii=False).encode("utf-8")) + 4096
 
     async def generate(self, project, timeout=120):
         if not self.settings.ready:
@@ -117,7 +117,7 @@ class CompatibleProvider:
             value = response.json()
             choice = value["choices"][0]
             if choice.get("finish_reason") not in ("stop", None):
-                raise ProviderError("模型输出未完整结束；请调整输出额度或换用更简洁的输入。")
+                raise ProviderError("模型服务未返回完整输出，已有结果保留；应用未设置单次输出上限。")
             content = choice["message"]["content"]
             if not isinstance(content, str):
                 raise ProviderError("模型未返回可解析的文本。")
@@ -134,4 +134,4 @@ class CompatibleProvider:
         except httpx.TimeoutException as exc:
             raise ProviderError("模型请求超时；在途消耗按预留量记录，请检查后再恢复。") from exc
         except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
-            raise ProviderError("模型响应或连接异常；请检查兼容模式。未自动重试付费请求。") from exc
+            raise ProviderError("模型响应结构或连接异常，已有结果保留。未自动重试付费请求。") from exc

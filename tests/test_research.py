@@ -28,7 +28,7 @@ def result(source_ids=None):
 
 
 class FakeProvider:
-    settings = Settings("https://example.test/v1", "test", "fixture", "json_object", "max_tokens", 1000)
+    settings = Settings("https://example.test/v1", "test", "fixture")
 
     def __init__(self, step=None, block=False):
         self.step = step or result()
@@ -201,7 +201,7 @@ async def test_model_plans_targeted_search_before_retrieval(store):
 
 
 def test_missing_key_cannot_start_a_production_run(tmp_path):
-    provider = CompatibleProvider(Settings("https://example.test/v1", "", "model", "text", "max_tokens", 1000))
+    provider = CompatibleProvider(Settings("https://example.test/v1", "", "model"))
     with TestClient(create_app(tmp_path, provider, EmptyLiterature)) as client:
         p = client.post('/api/projects', json={"title": "Project", "question": "Research question"}).json()
         assert client.post(f'/api/projects/{p["id"]}/runs', json={}).status_code == 422
@@ -221,20 +221,20 @@ def test_recovery_and_revision_conflict(store):
     assert store.project(p["id"])["revision"] == 1
 
 
-@pytest.mark.parametrize("mode", ["json_schema", "json_object", "text"])
-async def test_provider_modes_and_usage(mode):
+async def test_provider_omits_output_limits_and_reports_usage():
     seen = []
     def handle(request):
         seen.append(json.loads(request.content))
         return httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {
             "content": result().model_dump_json()}}], "usage": {"total_tokens": 523}})
-    settings = Settings("https://example.test/v1", "secret-test", "model", mode, "max_completion_tokens", 1000)
+    settings = Settings("https://example.test/v1", "secret-test", "model")
     provider = CompatibleProvider(settings, httpx.MockTransport(handle))
     project = {"question": "question", "constraints": "", "sources": [], "directions": [], "feedback": [], "memories": []}
     step, usage = await provider.generate(project)
     assert usage == 523 and step.directions[0].id == "direction_a"
-    assert seen[0]["max_completion_tokens"] == 1000
-    assert ("response_format" in seen[0]) == (mode != "text")
+    assert "max_completion_tokens" not in seen[0]
+    assert "max_tokens" not in seen[0]
+    assert "response_format" not in seen[0]
 
 
 async def test_provider_error_is_sanitized():
