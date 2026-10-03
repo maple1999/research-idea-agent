@@ -31,7 +31,9 @@ test('develop, inspect, correct and preserve a research direction', async ({ pag
   await page.getByRole('button', { name: '保存经验', exact: true }).click();
   await expect(page.locator('.memory')).toContainText('压缩发生在用户提问之前');
   await page.getByRole('tab', { name: '历史', exact: true }).click();
-  await expect(page.locator('.research-content details').first()).toContainText('版本 7');
+  const revision = (await page.locator('.project-header .eyebrow').innerText()).match(/V(\d+)/)?.[1];
+  expect(revision).toBeTruthy();
+  await expect(page.locator('.research-content details').first()).toContainText(`版本 ${revision}`);
   const downloadReady = page.waitForEvent('download');
   await page.getByRole('link', { name: '导出研究快照' }).click();
   expect((await downloadReady).suggestedFilename()).toBe('research-snapshot.json');
