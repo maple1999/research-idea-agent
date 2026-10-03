@@ -31,6 +31,9 @@ Retain stable direction IDs when revising; use new IDs for genuinely new branche
 Return 1-4 substantive directions. Preserve strong candidates and improve weak aspects.
 next_action: search for a specific missing piece (English query), develop to improve the
 proposal, or finish when the present result is useful. Explain the next action briefly.
+When search_enabled is true and relevant literature is missing, propose an initial
+direction and request targeted English literature search before treating it as reviewed.
+When search_enabled is false, work with supplied materials and do not request search.
 Return only a JSON object matching the provided schema. No markdown fences.
 """
 
@@ -75,7 +78,8 @@ class CompatibleProvider:
         data = {"question": project["question"], "constraints": project["constraints"],
                 "materials": sources, "current_directions": project["directions"][:4],
                 "feedback": project["feedback"], "experience": project["memories"],
-                "selections": project.get("selections", {})}
+                "selections": project.get("selections", {}),
+                "search_enabled": project.get("search_enabled", False)}
         return json.dumps(data, ensure_ascii=False)
 
     def request(self, project):

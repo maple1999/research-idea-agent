@@ -8,6 +8,7 @@ Create a research question, bring your sources, and develop a small set of resea
 
 - OpenAI-compatible Chat Completions APIs with configurable endpoint, model, output format and token parameter.
 - Autonomous, bounded rounds of literature discovery and proposal development.
+- A visible initial proposal followed by targeted, model-planned English literature queries.
 - Separate innovation, impact and feasibility reasoning for each direction.
 - Object / intervention site / operation / signal / output mechanism diagrams.
 - Source-linked claims and comparisons; unknown source IDs are rejected before saving.

@@ -143,7 +143,8 @@ async def test_budget_checked_before_model_call(store):
 
 async def test_pause_during_search_retrieves_pending_sources_on_resume(store):
     p, r = setup_run(store)
-    store.update_run(r["id"], budget=r["budget"] | {"use_search": True})
+    store.update_run(r["id"], budget=r["budget"] | {"use_search": True}, next_action="search",
+                     search_query="video token compression")
     entered, release = asyncio.Event(), asyncio.Event()
     class BlockingLiterature:
         async def search(self, query, timeout=30):
@@ -179,6 +180,24 @@ async def test_provider_failure_after_cancel_keeps_cancelled_status(store):
     provider.release.set()
     await task
     assert store.run(r["id"])["status"] == "cancelled"
+
+
+async def test_model_plans_targeted_search_before_retrieval(store):
+    p, r = setup_run(store)
+    store.update_run(r["id"], budget=r["budget"] | {"use_search": True})
+    seen = []
+    class Planner(FakeProvider):
+        async def generate(self, project, timeout=120):
+            assert project["search_enabled"]
+            seen.append("model")
+            return result().model_copy(update={"next_action": "search",
+                                               "search_query": "task conditioned video tokens"}), 350
+    class Search:
+        async def search(self, query, timeout=30):
+            seen.append(query)
+            return [], "fixture"
+    await Engine(store, Planner(), Search()).execute(r["id"])
+    assert seen == ["model", "task conditioned video tokens", "model"]
 
 
 def test_missing_key_cannot_start_a_production_run(tmp_path):

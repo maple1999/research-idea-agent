@@ -45,7 +45,7 @@ class Engine:
             if remaining <= 0 or run["calls"] >= budget["max_calls"]:
                 self.stop(run_id, "completed", "本轮预算已用完，当前研究成果已保存。")
                 return
-            if budget["use_search"] and (not run["searched"] or run["next_action"] == "search"):
+            if budget["use_search"] and run["next_action"] == "search":
                 query = run["search_query"] or project["question"][:200]
                 self.store.event(project["id"], "research.searching", {"summary": "查找相关基础：" + query})
                 started = time.monotonic()
@@ -80,6 +80,7 @@ class Engine:
                 if remaining <= 0:
                     self.stop(run_id, "completed", "本轮时间预算已用完，检索记录已保存。")
                     return
+            project = project | {"search_enabled": budget["use_search"]}
             try:
                 reserved = self.provider.reserve(project)
             except ProviderError as exc:
